@@ -24,6 +24,10 @@ def nayta_data():
     summat = {"T": 0, "H": 0, "CO2": 0, "p": 0}
     laskuri = 0
 
+    # Haetaan aikaväli listan alusta ja lopusta
+    aloitus_aika = data_historia[0].get("vastaanottoaika", "Ei tietoa")
+    lopetus_aika = data_historia[-1].get("vastaanottoaika", "Ei tietoa")
+
     # Rakennetaan HTML-taulukko ja tyylit
     html = """
     <html>
@@ -36,7 +40,8 @@ def nayta_data():
             th { background-color: #007bff; color: white; }
             tr:nth-child(even) { background-color: #f2f2f2; }
             .summary { background-color: #ffffff; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #007bff; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-            h2 { color: #333; }
+            h2 { color: #333; margin-top: 0; }
+            .time-range { color: #555; font-style: italic; margin-bottom: 15px; }
         </style>
     </head>
     <body>
@@ -44,15 +49,12 @@ def nayta_data():
 
     taulukon_rivit = ""
     for rivi in data_historia:
-        # Haetaan arvot eri mahdollisilla nimillä (T, H, CO2, pCount/person count)
         t = rivi.get("T", 0)
         h = rivi.get("H", 0)
         co2 = rivi.get("CO2", 0)
-        # Koulun laite käyttää usein pCount tai person count nimitystä
         p = rivi.get("pCount", rivi.get("person count", 0))
         aika = rivi.get("vastaanottoaika", rivi.get("Time", "Ei aikaa"))
 
-        # Lisätään summiin jos arvo on numero
         if isinstance(t, (int, float)): summat["T"] += t
         if isinstance(h, (int, float)): summat["H"] += h
         if isinstance(co2, (int, float)): summat["CO2"] += co2
@@ -61,17 +63,17 @@ def nayta_data():
 
         taulukon_rivit += f"<tr><td>{aika}</td><td>{t} °C</td><td>{h} %</td><td>{co2} ppm</td><td>{p} hlö</td></tr>"
 
-    # Lasketaan keskiarvot
     ka_t = round(summat["T"] / laskuri, 2)
     ka_h = round(summat["H"] / laskuri, 2)
     ka_co2 = round(summat["CO2"] / laskuri, 1)
     ka_p = round(summat["p"] / laskuri, 1)
     
-    # Lisätään yhteenveto
     html += f"""
     <div class="summary">
         <h2>📊 Kerätyn datan keskiarvot</h2>
+        <p class="time-range">🕒 <b>Aikaväli:</b> {aloitus_aika}  &mdash;  {lopetus_aika}</p>
         <p><b>Näytteitä yhteensä:</b> {laskuri} kpl</p>
+        <hr>
         <p><b>Lämpötila keskimäärin:</b> {ka_t} °C</p>
         <p><b>Kosteus keskimäärin:</b> {ka_h} %</p>
         <p><b>CO2-taso keskimäärin:</b> {ka_co2} ppm</p>
@@ -94,21 +96,17 @@ MQTT_TOPIC = "automaatio"
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        print("Yhdistetty välittäjään onnistuneesti!")
         client.subscribe(MQTT_TOPIC)
 
 def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
-        # Lisätään aina aikaleima tallennushetkestä
         payload["vastaanottoaika"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data_historia.append(payload)
-        print(f"Uutta dataa tallennettu: {payload}")
     except Exception as e:
         print(f"Virhe: {e}")
 
 def start_mqtt():
-    # Käytetään yhteensopivaa versiota
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
     client.username_pw_set(MQTT_USER, MQTT_PASS)
     client.on_connect = on_connect
