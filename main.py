@@ -4,6 +4,7 @@ from flask import Flask
 import threading
 import os
 from datetime import datetime
+import statistics
 
 # 1. Perustetaan Flask-palvelin
 app = Flask(__name__)
@@ -13,78 +14,87 @@ data_historia = []
 
 @app.route('/')
 def home():
-    return "<h1>Henkilölaskuri-kerääjä on käynnissä!</h1><p>Katso taulukko ja keskiarvot: <a href='/data'>/data</a></p>", 200
+    return "<h1>IoT Tilastotyökalu on käynnissä!</h1><p>Katso laajat tilastot: <a href='/data'>/data</a></p>", 200
 
 @app.route('/data')
 def nayta_data():
     if not data_historia:
         return "Ei vielä dataa kerättynä. Odota hetki tai varmista että anturit ovat päällä."
     
-    # Alustetaan laskurit keskiarvoja varten
-    summat = {"T": 0, "H": 0, "CO2": 0, "p": 0}
-    laskuri = 0
+    # Kerätään numerot omiin listoihinsa tilastoja varten
+    arvot = {"T": [], "H": [], "CO2": [], "p": []}
+    
+    for rivi in data_historia:
+        t = rivi.get("T")
+        h = rivi.get("H")
+        co2 = rivi.get("CO2")
+        p = rivi.get("pCount", rivi.get("person count"))
 
-    # Haetaan aikaväli listan alusta ja lopusta
-    aloitus_aika = data_historia[0].get("vastaanottoaika", "Ei tietoa")
-    lopetus_aika = data_historia[-1].get("vastaanottoaika", "Ei tietoa")
+        if isinstance(t, (int, float)): arvot["T"].append(t)
+        if isinstance(h, (int, float)): arvot["H"].append(h)
+        if isinstance(co2, (int, float)): arvot["CO2"].append(co2)
+        if isinstance(p, (int, float)): arvot["p"].append(p)
 
-    # Rakennetaan HTML-taulukko ja tyylit
-    html = """
+    def laske_tilastot(lista):
+        if len(lista) < 1: return ["-"] * 5
+        ka = round(statistics.mean(lista), 2)
+        mini = round(min(lista), 2)
+        maxi = round(max(lista), 2)
+        med = round(statistics.median(lista), 2)
+        # Hajontaa varten tarvitaan vähintään 2 arvoa
+        hajonta = round(statistics.stdev(lista), 2) if len(lista) > 1 else 0
+        return [ka, mini, maxi, med, hajonta]
+
+    stats_t = laske_tilastot(arvot["T"])
+    stats_h = laske_tilastot(arvot["H"])
+    stats_co2 = laske_tilastot(arvot["CO2"])
+    stats_p = laske_tilastot(arvot["p"])
+
+    html = f"""
     <html>
     <head>
-        <title>IoT Data Dashboard</title>
+        <title>IoT Laajat Tilastot</title>
         <style>
-            body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
-            table { border-collapse: collapse; width: 100%; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-            th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-            th { background-color: #007bff; color: white; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
-            .summary { background-color: #ffffff; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #007bff; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-            h2 { color: #333; margin-top: 0; }
-            .time-range { color: #555; font-style: italic; margin-bottom: 15px; }
+            body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }}
+            table {{ border-collapse: collapse; width: 100%; background: white; margin-bottom: 30px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+            th, td {{ border: 1px solid #ddd; padding: 10px; text-align: center; }}
+            th {{ background-color: #007bff; color: white; }}
+            tr:nth-child(even) {{ background-color: #f2f2f2; }}
+            .summary {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #28a745; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+            h2 {{ color: #333; }}
         </style>
     </head>
     <body>
+        <div class="summary">
+            <h2>📊 Tilastollinen yhteenveto</h2>
+            <p><b>Näytteitä yhteensä:</b> {len(data_historia)} kpl</p>
+            <p><b>Aikaväli:</b> {data_historia[0].get('vastaanottoaika')} &mdash; {data_historia[-1].get('vastaanottoaika')}</p>
+            
+            <table>
+                <tr>
+                    <th>Suure</th>
+                    <th>Keskiarvo</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>Mediaani</th>
+                    <th>Keskihajonta</th>
+                </tr>
+                <tr><td>Lämpötila (°C)</td><td>{stats_t[0]}</td><td>{stats_t[1]}</td><td>{stats_t[2]}</td><td>{stats_t[3]}</td><td>{stats_t[4]}</td></tr>
+                <tr><td>Kosteus (%)</td><td>{stats_h[0]}</td><td>{stats_h[1]}</td><td>{stats_h[2]}</td><td>{stats_h[3]}</td><td>{stats_h[4]}</td></tr>
+                <tr><td>CO2 (ppm)</td><td>{stats_co2[0]}</td><td>{stats_co2[1]}</td><td>{stats_co2[2]}</td><td>{stats_co2[3]}</td><td>{stats_co2[4]}</td></tr>
+                <tr><td>Ihmismäärä</td><td>{stats_p[0]}</td><td>{stats_p[1]}</td><td>{stats_p[2]}</td><td>{stats_p[3]}</td><td>{stats_p[4]}</td></tr>
+            </table>
+        </div>
+
+        <h3>📋 Kaikki kerätyt rivit</h3>
+        <table>
+            <tr><th>Aikaleima</th><th>Lämpötila</th><th>Kosteus</th><th>CO2</th><th>Ihmiset</th></tr>
     """
-
-    taulukon_rivit = ""
-    for rivi in data_historia:
-        t = rivi.get("T", 0)
-        h = rivi.get("H", 0)
-        co2 = rivi.get("CO2", 0)
-        p = rivi.get("pCount", rivi.get("person count", 0))
-        aika = rivi.get("vastaanottoaika", rivi.get("Time", "Ei aikaa"))
-
-        if isinstance(t, (int, float)): summat["T"] += t
-        if isinstance(h, (int, float)): summat["H"] += h
-        if isinstance(co2, (int, float)): summat["CO2"] += co2
-        if isinstance(p, (int, float)): summat["p"] += p
-        laskuri += 1
-
-        taulukon_rivit += f"<tr><td>{aika}</td><td>{t} °C</td><td>{h} %</td><td>{co2} ppm</td><td>{p} hlö</td></tr>"
-
-    ka_t = round(summat["T"] / laskuri, 2)
-    ka_h = round(summat["H"] / laskuri, 2)
-    ka_co2 = round(summat["CO2"] / laskuri, 1)
-    ka_p = round(summat["p"] / laskuri, 1)
     
-    html += f"""
-    <div class="summary">
-        <h2>📊 Kerätyn datan keskiarvot</h2>
-        <p class="time-range">🕒 <b>Aikaväli:</b> {aloitus_aika}  &mdash;  {lopetus_aika}</p>
-        <p><b>Näytteitä yhteensä:</b> {laskuri} kpl</p>
-        <hr>
-        <p><b>Lämpötila keskimäärin:</b> {ka_t} °C</p>
-        <p><b>Kosteus keskimäärin:</b> {ka_h} %</p>
-        <p><b>CO2-taso keskimäärin:</b> {ka_co2} ppm</p>
-        <p><b>Ihmismäärä keskimäärin:</b> {ka_p} henkilöä</p>
-    </div>
-    """
-
-    html += "<table><tr><th>Aikaleima</th><th>Lämpötila</th><th>Kosteus</th><th>CO2</th><th>Ihmismäärä</th></tr>"
-    html += taulukon_rivit
+    for rivi in reversed(data_historia):
+        html += f"<tr><td>{rivi.get('vastaanottoaika')}</td><td>{rivi.get('T', '-')}</td><td>{rivi.get('H', '-')}</td><td>{rivi.get('CO2', '-')}</td><td>{rivi.get('pCount', rivi.get('person count', '-'))}</td></tr>"
+    
     html += "</table></body></html>"
-    
     return html
 
 # 2. MQTT-asetukset
@@ -95,16 +105,14 @@ MQTT_PASS = "Z0od2PZF65jbtcXu"
 MQTT_TOPIC = "automaatio"
 
 def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        client.subscribe(MQTT_TOPIC)
+    if rc == 0: client.subscribe(MQTT_TOPIC)
 
 def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
         payload["vastaanottoaika"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data_historia.append(payload)
-    except Exception as e:
-        print(f"Virhe: {e}")
+    except Exception as e: print(f"Virhe: {e}")
 
 def start_mqtt():
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
