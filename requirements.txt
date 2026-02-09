@@ -1,2 +1,4 @@
-paho-mqtt
 flask
+paho-mqtt
+pymongo
+dnspython
