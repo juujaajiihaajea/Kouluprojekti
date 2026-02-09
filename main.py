@@ -9,46 +9,19 @@ import statistics
 # 1. Perustetaan Flask-palvelin
 app = Flask(__name__)
 
-# Tiedostopolku Renderin levylle (HUOM: vaatii "Disk"-asetuksen Renderissä)
-# Jos et ole vielä luonut Disk-osiota, koodi käyttää oletuskansiota
-DATA_DIR = "/data"
-if not os.path.exists(DATA_DIR):
-    os.makedirs(DATA_DIR, exist_ok=True)
-
-DATA_FILE = os.path.join(DATA_DIR, "data_arkisto.json")
-
-# Lataa vanha data tiedostosta käynnistyksen yhteydessä
-def lataa_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r") as f:
-                content = f.read()
-                return json.loads(content) if content else []
-        except Exception as e:
-            print(f"Virhe tiedoston luvussa: {e}")
-            return []
-    return []
-
-# Tallenna data tiedostoon
-def tallenna_data(lista):
-    try:
-        with open(DATA_FILE, "w") as f:
-            json.dump(lista, f)
-    except Exception as e:
-        print(f"Tallennusvirhe: {e}")
-
-# Alustetaan lista tallennetulla datalla
-data_historia = lataa_data()
+# Lista, johon tallennetaan viestit välimuistiin
+data_historia = []
 
 @app.route('/')
 def home():
-    return "<h1>IoT Tilastotyökalu (Pysyvä tallennus)</h1><p>Katso laajat tilastot: <a href='/data'>/data</a></p>", 200
+    return "<h1>IoT Tilastotyökalu on käynnissä!</h1><p>Katso laajat tilastot: <a href='/data'>/data</a></p>", 200
 
 @app.route('/data')
 def nayta_data():
     if not data_historia:
         return "Ei vielä dataa kerättynä. Odota hetki tai varmista että anturit ovat päällä."
     
+    # Kerätään numerot omiin listoihinsa tilastoja varten
     arvot = {"T": [], "H": [], "CO2": [], "p": []}
     
     for rivi in data_historia:
@@ -68,6 +41,7 @@ def nayta_data():
         mini = round(min(lista), 2)
         maxi = round(max(lista), 2)
         med = round(statistics.median(lista), 2)
+        # Hajontaa varten tarvitaan vähintään 2 arvoa
         hajonta = round(statistics.stdev(lista), 2) if len(lista) > 1 else 0
         return [ka, mini, maxi, med, hajonta]
 
@@ -87,17 +61,23 @@ def nayta_data():
             th {{ background-color: #007bff; color: white; }}
             tr:nth-child(even) {{ background-color: #f2f2f2; }}
             .summary {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #28a745; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+            h2 {{ color: #333; }}
         </style>
     </head>
     <body>
         <div class="summary">
-            <h2>📊 Tilastollinen yhteenveto (Pysyvä tallennus)</h2>
+            <h2>📊 Tilastollinen yhteenveto</h2>
             <p><b>Näytteitä yhteensä:</b> {len(data_historia)} kpl</p>
-            <p><b>Aikaväli:</b> {data_historia[0].get('vastaanottoaika', '-')} &mdash; {data_historia[-1].get('vastaanottoaika', '-')}</p>
+            <p><b>Aikaväli:</b> {data_historia[0].get('vastaanottoaika')} &mdash; {data_historia[-1].get('vastaanottoaika')}</p>
             
             <table>
                 <tr>
-                    <th>Suure</th><th>Keskiarvo</th><th>Min</th><th>Max</th><th>Mediaani</th><th>Keskihajonta</th>
+                    <th>Suure</th>
+                    <th>Keskiarvo</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>Mediaani</th>
+                    <th>Keskihajonta</th>
                 </tr>
                 <tr><td>Lämpötila (°C)</td><td>{stats_t[0]}</td><td>{stats_t[1]}</td><td>{stats_t[2]}</td><td>{stats_t[3]}</td><td>{stats_t[4]}</td></tr>
                 <tr><td>Kosteus (%)</td><td>{stats_h[0]}</td><td>{stats_h[1]}</td><td>{stats_h[2]}</td><td>{stats_h[3]}</td><td>{stats_h[4]}</td></tr>
@@ -105,7 +85,8 @@ def nayta_data():
                 <tr><td>Ihmismäärä</td><td>{stats_p[0]}</td><td>{stats_p[1]}</td><td>{stats_p[2]}</td><td>{stats_p[3]}</td><td>{stats_p[4]}</td></tr>
             </table>
         </div>
-        <h3>📋 Kerätty arkisto</h3>
+
+        <h3>📋 Kaikki kerätyt rivit</h3>
         <table>
             <tr><th>Aikaleima</th><th>Lämpötila</th><th>Kosteus</th><th>CO2</th><th>Ihmiset</th></tr>
     """
@@ -131,10 +112,6 @@ def on_message(client, userdata, msg):
         payload = json.loads(msg.payload.decode())
         payload["vastaanottoaika"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data_historia.append(payload)
-        
-        # Tallenna tiedostoon jokaisen viestin jälkeen
-        tallenna_data(data_historia)
-        
     except Exception as e: print(f"Virhe: {e}")
 
 def start_mqtt():
