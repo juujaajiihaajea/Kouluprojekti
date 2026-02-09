@@ -6,10 +6,19 @@ import os
 from datetime import datetime
 import statistics
 from pymongo import MongoClient
+import urllib.parse
 
 # 1. MongoDB määritykset
-# VAIHDA TÄHÄN UUSI SALASANASI (ilman @-merkkiä lopussa)
-MONGO_URI = "mongodb+srv://mikkhama:Koulu2026@cluster0.xrolxhu.mongodb.net/?appName=Cluster0"
+username = "mikkhama"
+# KIRJOITA TÄHÄN SALASANASI (vaikka siinä olisi se @-merkki)
+password = "Jeejeejee123@"
+
+# Tämä koodaa salasanan oikein (erityisesti se @-merkki)
+safe_password = urllib.parse.quote_plus(password)
+
+# Lisätty tlsAllowInvalidCertificates=true korjaamaan SSL-virhe
+MONGO_URI = f"mongodb+srv://{username}:{safe_password}@cluster0.xrolxhu.mongodb.net/?appName=Cluster0&tlsAllowInvalidCertificates=true"
+
 client_db = MongoClient(MONGO_URI)
 db = client_db["iot_projekti"]
 kokoelma = db["sensoridata"]
@@ -23,12 +32,13 @@ def home():
 @app.route('/data')
 def nayta_data():
     try:
+        # Haetaan data tietokannasta
         kaikki_data = list(kokoelma.find().sort("vastaanottoaika", -1))
     except Exception as e:
         return f"Tietokantavirhe: {e}"
     
     if not kaikki_data:
-        return "Ei vielä dataa tietokannassa."
+        return "Ei vielä dataa tietokannassa. Odota hetki, että ensimmäinen viesti saapuu."
     
     arvot = {"T": [], "H": [], "CO2": [], "p": []}
     for rivi in kaikki_data:
@@ -45,15 +55,29 @@ def nayta_data():
     st = {k: stats(arvot[k]) for k in arvot}
 
     html = f"""
-    <html><body>
-        <h2>📊 Tilastot (MongoDB)</h2>
-        <table border="1">
-            <tr><th>Suure</th><th>KA</th><th>Min</th><th>Max</th><th>Med</th><th>Hajonta</th></tr>
-            <tr><td>Lämpö</td><td>{st['T'][0]}</td><td>{st['T'][1]}</td><td>{st['T'][2]}</td><td>{st['T'][3]}</td><td>{st['T'][4]}</td></tr>
-            <tr><td>Ihmiset</td><td>{st['p'][0]}</td><td>{st['p'][1]}</td><td>{st['p'][2]}</td><td>{st['p'][3]}</td><td>{st['p'][4]}</td></tr>
-        </table>
-        <h3>📋 Lokit</h3>
-        <table border="1"><tr><th>Aika</th><th>T</th><th>H</th><th>CO2</th><th>P</th></tr>
+    <html>
+    <head>
+        <title>IoT MongoDB Stats</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }}
+            table {{ border-collapse: collapse; width: 100%; background: white; margin-bottom: 30px; }}
+            th, td {{ border: 1px solid #ddd; padding: 10px; text-align: center; }}
+            th {{ background-color: #28a745; color: white; }}
+            .summary {{ background: white; padding: 20px; border-radius: 8px; border-left: 5px solid #28a745; margin-bottom: 20px; }}
+        </style>
+    </head>
+    <body>
+        <div class="summary">
+            <h2>📊 Tilastollinen yhteenveto (Pysyvä MongoDB)</h2>
+            <table>
+                <tr><th>Suure</th><th>KA</th><th>Min</th><th>Max</th><th>Med</th><th>Hajonta</th></tr>
+                <tr><td>Lämpötila (°C)</td><td>{st['T'][0]}</td><td>{st['T'][1]}</td><td>{st['T'][2]}</td><td>{st['T'][3]}</td><td>{st['T'][4]}</td></tr>
+                <tr><td>Ihmismäärä</td><td>{st['p'][0]}</td><td>{st['p'][1]}</td><td>{st['p'][2]}</td><td>{st['p'][3]}</td><td>{st['p'][4]}</td></tr>
+            </table>
+        </div>
+        <h3>📋 Kaikki kerätyt rivit</h3>
+        <table>
+            <tr><th>Aikaleima</th><th>T</th><th>H</th><th>CO2</th><th>P</th></tr>
     """
     for r in kaikki_data:
         html += f"<tr><td>{r.get('vastaanottoaika')}</td><td>{r.get('T','-')}</td><td>{r.get('H','-')}</td><td>{r.get('CO2','-')}</td><td>{r.get('pCount', r.get('person count','-'))}</td></tr>"
@@ -61,6 +85,7 @@ def nayta_data():
     html += "</table></body></html>"
     return html
 
+# 2. MQTT ja tallennus
 MQTT_BROKER = "automaatio.cloud.shiftr.io"
 MQTT_TOPIC = "automaatio"
 
@@ -69,7 +94,8 @@ def on_message(client, userdata, msg):
         p = json.loads(msg.payload.decode())
         p["vastaanottoaika"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         kokoelma.insert_one(p)
-    except: pass
+    except Exception as e:
+        print(f"Tallennusvirhe: {e}")
 
 def start_mqtt():
     c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
@@ -81,4 +107,5 @@ def start_mqtt():
 
 if __name__ == "__main__":
     threading.Thread(target=start_mqtt, daemon=True).start()
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
