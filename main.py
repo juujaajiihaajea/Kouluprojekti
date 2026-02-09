@@ -5,26 +5,35 @@ import threading
 import os
 from datetime import datetime
 import statistics
+from pymongo import MongoClient
 
-# 1. Perustetaan Flask-palvelin
+# 1. MongoDB määritykset
+# VAIHDA OMA SALASANASI tähän riville
+MONGO_URI = "mongodb+srv://mikkhama:Jeejeejee123@ @cluster0.xrolxhu.mongodb.net/?appName=Cluster0"
+client_db = MongoClient(MONGO_URI)
+db = client_db["iot_projekti"]
+kokoelma = db["sensoridata"]
+
 app = Flask(__name__)
-
-# Lista, johon tallennetaan viestit välimuistiin
-data_historia = []
 
 @app.route('/')
 def home():
-    return "<h1>IoT Tilastotyökalu on käynnissä!</h1><p>Katso laajat tilastot: <a href='/data'>/data</a></p>", 200
+    return "<h1>IoT Tilastotyökalu (MongoDB Atlas)</h1><p>Katso laajat tilastot: <a href='/data'>/data</a></p>", 200
 
 @app.route('/data')
 def nayta_data():
-    if not data_historia:
-        return "Ei vielä dataa kerättynä. Odota hetki tai varmista että anturit ovat päällä."
+    # Haetaan kaikki data tietokannasta, uusin ensin
+    try:
+        kaikki_data = list(kokoelma.find().sort("vastaanottoaika", -1))
+    except Exception as e:
+        return f"Tietokantavirhe: {e}"
     
-    # Kerätään numerot omiin listoihinsa tilastoja varten
+    if not kaikki_data:
+        return "Ei vielä dataa tietokannassa. Odota hetki, että ensimmäinen viesti saapuu."
+    
     arvot = {"T": [], "H": [], "CO2": [], "p": []}
     
-    for rivi in data_historia:
+    for rivi in kaikki_data:
         t = rivi.get("T")
         h = rivi.get("H")
         co2 = rivi.get("CO2")
@@ -41,7 +50,6 @@ def nayta_data():
         mini = round(min(lista), 2)
         maxi = round(max(lista), 2)
         med = round(statistics.median(lista), 2)
-        # Hajontaa varten tarvitaan vähintään 2 arvoa
         hajonta = round(statistics.stdev(lista), 2) if len(lista) > 1 else 0
         return [ka, mini, maxi, med, hajonta]
 
@@ -53,76 +61,11 @@ def nayta_data():
     html = f"""
     <html>
     <head>
-        <title>IoT Laajat Tilastot</title>
+        <title>IoT MongoDB Stats</title>
         <style>
             body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }}
             table {{ border-collapse: collapse; width: 100%; background: white; margin-bottom: 30px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
             th, td {{ border: 1px solid #ddd; padding: 10px; text-align: center; }}
-            th {{ background-color: #007bff; color: white; }}
+            th {{ background-color: #28a745; color: white; }}
             tr:nth-child(even) {{ background-color: #f2f2f2; }}
-            .summary {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #28a745; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
-            h2 {{ color: #333; }}
-        </style>
-    </head>
-    <body>
-        <div class="summary">
-            <h2>📊 Tilastollinen yhteenveto</h2>
-            <p><b>Näytteitä yhteensä:</b> {len(data_historia)} kpl</p>
-            <p><b>Aikaväli:</b> {data_historia[0].get('vastaanottoaika')} &mdash; {data_historia[-1].get('vastaanottoaika')}</p>
-            
-            <table>
-                <tr>
-                    <th>Suure</th>
-                    <th>Keskiarvo</th>
-                    <th>Min</th>
-                    <th>Max</th>
-                    <th>Mediaani</th>
-                    <th>Keskihajonta</th>
-                </tr>
-                <tr><td>Lämpötila (°C)</td><td>{stats_t[0]}</td><td>{stats_t[1]}</td><td>{stats_t[2]}</td><td>{stats_t[3]}</td><td>{stats_t[4]}</td></tr>
-                <tr><td>Kosteus (%)</td><td>{stats_h[0]}</td><td>{stats_h[1]}</td><td>{stats_h[2]}</td><td>{stats_h[3]}</td><td>{stats_h[4]}</td></tr>
-                <tr><td>CO2 (ppm)</td><td>{stats_co2[0]}</td><td>{stats_co2[1]}</td><td>{stats_co2[2]}</td><td>{stats_co2[3]}</td><td>{stats_co2[4]}</td></tr>
-                <tr><td>Ihmismäärä</td><td>{stats_p[0]}</td><td>{stats_p[1]}</td><td>{stats_p[2]}</td><td>{stats_p[3]}</td><td>{stats_p[4]}</td></tr>
-            </table>
-        </div>
-
-        <h3>📋 Kaikki kerätyt rivit</h3>
-        <table>
-            <tr><th>Aikaleima</th><th>Lämpötila</th><th>Kosteus</th><th>CO2</th><th>Ihmiset</th></tr>
-    """
-    
-    for rivi in reversed(data_historia):
-        html += f"<tr><td>{rivi.get('vastaanottoaika')}</td><td>{rivi.get('T', '-')}</td><td>{rivi.get('H', '-')}</td><td>{rivi.get('CO2', '-')}</td><td>{rivi.get('pCount', rivi.get('person count', '-'))}</td></tr>"
-    
-    html += "</table></body></html>"
-    return html
-
-# 2. MQTT-asetukset
-MQTT_BROKER = "automaatio.cloud.shiftr.io"
-MQTT_PORT = 1883
-MQTT_USER = "automaatio"
-MQTT_PASS = "Z0od2PZF65jbtcXu"
-MQTT_TOPIC = "automaatio"
-
-def on_connect(client, userdata, flags, rc):
-    if rc == 0: client.subscribe(MQTT_TOPIC)
-
-def on_message(client, userdata, msg):
-    try:
-        payload = json.loads(msg.payload.decode())
-        payload["vastaanottoaika"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        data_historia.append(payload)
-    except Exception as e: print(f"Virhe: {e}")
-
-def start_mqtt():
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
-    client.username_pw_set(MQTT_USER, MQTT_PASS)
-    client.on_connect = on_connect
-    client.on_message = on_message
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    client.loop_forever()
-
-if __name__ == "__main__":
-    threading.Thread(target=start_mqtt, daemon=True).start()
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+            .summary {{ background: white; padding: 20px; border-radius: 8px; border-left: 5px solid #28a745; box-shadow:
