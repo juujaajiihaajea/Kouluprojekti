@@ -10,13 +10,9 @@ import urllib.parse
 
 # 1. MongoDB määritykset
 username = "mikkhama"
-# KIRJOITA TÄHÄN SALASANASI (vaikka siinä olisi se @-merkki)
 password = "Jeejeejee123@"
 
-# Tämä koodaa salasanan oikein (erityisesti se @-merkki)
 safe_password = urllib.parse.quote_plus(password)
-
-# Lisätty tlsAllowInvalidCertificates=true korjaamaan SSL-virhe
 MONGO_URI = f"mongodb+srv://{username}:{safe_password}@cluster0.xrolxhu.mongodb.net/?appName=Cluster0&tlsAllowInvalidCertificates=true"
 
 client_db = MongoClient(MONGO_URI)
@@ -32,7 +28,7 @@ def home():
 @app.route('/data')
 def nayta_data():
     try:
-        # Haetaan data tietokannasta
+        # Haetaan kaikki data tietokannasta
         kaikki_data = list(kokoelma.find().sort("vastaanottoaika", -1))
     except Exception as e:
         return f"Tietokantavirhe: {e}"
@@ -40,18 +36,31 @@ def nayta_data():
     if not kaikki_data:
         return "Ei vielä dataa tietokannassa. Odota hetki, että ensimmäinen viesti saapuu."
     
+    # Valmistellaan listat laskentaa varten
     arvot = {"T": [], "H": [], "CO2": [], "p": []}
     for rivi in kaikki_data:
+        # Lämpötila, Kosteus ja CO2
         for k in ["T", "H", "CO2"]:
             v = rivi.get(k)
-            if isinstance(v, (int, float)): arvot[k].append(v)
+            if isinstance(v, (int, float)): 
+                arvot[k].append(v)
+        
+        # Ihmismäärä (tuki molemmille nimille)
         p = rivi.get("pCount", rivi.get("person count"))
-        if isinstance(p, (int, float)): arvot["p"].append(p)
+        if isinstance(p, (int, float)): 
+            arvot["p"].append(p)
 
+    # Apufunktio tilastojen laskemiseen
     def stats(l):
         if not l: return ["-"] * 5
-        return [round(statistics.mean(l),2), min(l), max(l), round(statistics.median(l),2), round(statistics.stdev(l),2) if len(l)>1 else 0]
+        mean_val = round(statistics.mean(l), 2)
+        min_val = min(l)
+        max_val = max(l)
+        med_val = round(statistics.median(l), 2)
+        std_val = round(statistics.stdev(l), 2) if len(l) > 1 else 0
+        return [mean_val, min_val, max_val, med_val, std_val]
 
+    # Lasketaan tilastot kaikille neljälle
     st = {k: stats(arvot[k]) for k in arvot}
 
     html = f"""
@@ -68,10 +77,12 @@ def nayta_data():
     </head>
     <body>
         <div class="summary">
-            <h2>📊 Tilastollinen yhteenveto (Pysyvä MongoDB)</h2>
+            <h2>📊 Tilastollinen yhteenveto ({len(kaikki_data)} riviä)</h2>
             <table>
-                <tr><th>Suure</th><th>KA</th><th>Min</th><th>Max</th><th>Med</th><th>Hajonta</th></tr>
+                <tr><th>Suure</th><th>KA (Keskiarvo)</th><th>Min</th><th>Max</th><th>Med (Mediaani)</th><th>Hajonta</th></tr>
                 <tr><td>Lämpötila (°C)</td><td>{st['T'][0]}</td><td>{st['T'][1]}</td><td>{st['T'][2]}</td><td>{st['T'][3]}</td><td>{st['T'][4]}</td></tr>
+                <tr><td>Kosteus (%)</td><td>{st['H'][0]}</td><td>{st['H'][1]}</td><td>{st['H'][2]}</td><td>{st['H'][3]}</td><td>{st['H'][4]}</td></tr>
+                <tr><td>Hiilidioksidi (ppm)</td><td>{st['CO2'][0]}</td><td>{st['CO2'][1]}</td><td>{st['CO2'][2]}</td><td>{st['CO2'][3]}</td><td>{st['CO2'][4]}</td></tr>
                 <tr><td>Ihmismäärä</td><td>{st['p'][0]}</td><td>{st['p'][1]}</td><td>{st['p'][2]}</td><td>{st['p'][3]}</td><td>{st['p'][4]}</td></tr>
             </table>
         </div>
@@ -107,5 +118,4 @@ def start_mqtt():
 
 if __name__ == "__main__":
     threading.Thread(target=start_mqtt, daemon=True).start()
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    port =
